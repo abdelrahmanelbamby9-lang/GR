@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>My AI Chatbot</title>
+
+  <!-- Markdown renderer -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- Tailwind CSS for modern styling + dark mode -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root { --bg: #0f0f0f; --surface: #1a1a1a; --text: #e4e4e7; --primary: #a78bfa; }
+    body { background: var(--bg); color: var(--text); }
+    #chat { scrollbar-width: thin; scrollbar-color: #52525b transparent; }
+    #chat::-webkit-scrollbar { width: 6px; }
+    #chat::-webkit-scrollbar-track { background: transparent; }
+    #chat::-webkit-scrollbar-thumb { background: #52525b; border-radius: 3px; }
+    .markdown code { background: #27272a; padding: 0.2em 0.4em; border-radius: 4px; }
+    .markdown pre { background: #18181b; padding: 1rem; border-radius: 8px; overflow-x: auto; }
+    .typing-dots span { opacity: 0; animation: dotPulse 1.5s infinite; }
+    .typing-dots span:nth-child(1) { animation-delay: 0s; }
+    .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes dotPulse { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <div class="flex-1 max-w-4xl mx-auto w-full p-4">
+    <h1 class="text-3xl font-bold text-center my-6 bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
+      My Private AI Chatbot
+    </h1>
+
+    <div id="chat" class="flex flex-col gap-4 mb-4 h-[65vh] overflow-y-auto p-6 bg-[#111113] rounded-2xl border border-zinc-800">
+      <div class="text-center text-zinc-500 text-sm">Chat started • DeepSeek R1</div>
+    </div>
+
+    <div class="flex gap-3">
+      <input
+        id="user-input"
+        type="text"
+        placeholder="Ask me anything..."
+        class="flex-1 px-5 py-4 bg-zinc-900 border border-zinc-700 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-purple-500 transition"
+        autocomplete="off"
+      />
+      <button onclick="sendMessage()" id="send-btn"
+        class="px-6 py-4 bg-gradient-to-r from-purple-600 to-pink-600 rounded-xl font-medium hover:from-purple-700 hover:to-pink-700 transition shadow-lg">
+        Send
+      </button>
+    </div>
+  </div>
+
+  <script>
+    // ⚠️ ONLY FOR LOCAL/PRIVATE USE — NEVER PUBLISH THIS KEY
+    const API_KEY = "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";
+    const MODEL = "deepseek/deepseek-r1-0528"; // You can change this
+
+    const chatContainer = document.getElementById("chat");
+    const inputBox = document.getElementById("user-input");
+    const sendBtn = document.getElementById("send-btn");
+
+    // Render markdown safely
+    marked.setOptions({
+      breaks: true,
+      gfm: true,
+      highlight: function(code) {
+        return code; // You can add syntax highlighting later with highlight.js
+      }
+    });
+
+    function addMessage(role, content) {
+      const bubble = document.createElement("div");
+      bubble.className = `max-w-full ${role === "user" ? "ml-auto bg-gradient-to-r from-purple-600 to-pink-600" : "mr-auto bg-zinc-800"} 
+                          text-white p-4 rounded-2xl shadow-lg max-w-prose break-words`;
+
+      if (role === "assistant" && content === "typing") {
+        bubble.innerHTML = `
+          <div class="flex items-center gap-2 typing-dots">
+            <span class="w-2 h-2 bg-zinc-400 rounded-full"></span>
+            <span class="w-2 h-2 bg-zinc-400 rounded-full"></span>
+            <span class="w-2 h-2 bg-zinc-400 rounded-full"></span>
+          </div>`;
+      } else if (role === "assistant") {
+        bubble.innerHTML = `<div class="markdown">${marked.parse(content)}</div>`;
+      } else {
+        bubble.textContent = content;
+      }
+
+      chatContainer.appendChild(bubble);
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+      return bubble;
+    }
+
+    async function sendMessage() {
+      const message = inputBox.value.trim();
+      if (!message) return;
+
+      addMessage("user", message);
+      inputBox.value = "";
+      sendBtn.disabled = true;
+
+      const typingBubble = addMessage("assistant", "typing");
+
+      try {
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${API_KEY}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": window.location.href,
+            "X-Title": "My Private AI Chatbot",
+          },
+          body: JSON.stringify({
+            model: MODEL,
+            messages: [
+              { role: "system", content: "You are a helpful, clever, and friendly AI assistant. Respond naturally and use Markdown when appropriate." },
+              ...Array.from(chatContainer.querySelectorAll(":not(:last-child):not(.typing-dots)"))
+                .filter(el => !el.innerHTML.includes("typing-dots"))
+                .map(el => ({
+                  role: el.classList.contains("from-purple-600") ? "user" : "assistant",
+                  content: el.textContent || el.innerText
+                })),
+              { role: "user", content: message }
+            ],
+            temperature: 0.8,
+            max_tokens: 2048
+          })
+        });
+
+        if (!response.ok) {
+          const err = await response.text();
+          throw new Error(`HTTP ${response.status}: ${err}`);
+        }
+
+        const data = await response.json();
+        const reply = data.choices[0]?.message?.content || "No response.";
+
+        typingBubble.remove();
+        addMessage("assistant", reply.trim());
+
+      } catch (err) {
+        typingBubble.remove();
+        addMessage("assistant", `Error: ${err.message}`);
+        console.error(err);
+      } finally {
+        sendBtn.disabled = false;
+        inputBox.focus();
+      }
+    }
+
+    // Enter to send
+    inputBox.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    // Auto-focus input
+    inputBox.focus();
+  </script>
+</body>
+</html>
